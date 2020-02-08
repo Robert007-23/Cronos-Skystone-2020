@@ -25,7 +25,12 @@ int test = 3;
 boolean skybridge = true;
 double RightMotorPower = 0.5;
 double LeftMotorPower = 0.55;
+double correction;
 
+    BNO055IMU               imu;
+    Orientation             lastAngles = new Orientation();
+    double                  globalAngle, power = .5;
+    
 //time
 ElapsedTime runtime = new ElapsedTime(); 
 
@@ -47,7 +52,7 @@ DcMotor i_Right;
 Servo s_LeftF;
 Servo s_RightF;
 
-//funtions (THX Bryce) 
+//funtions (THX Bryce) ///////////////////////////////////////////////////////////////////////////////////
     public void drive(double speed, int leftCM, int rightCM) {
         //Reset encoders
         setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER); 
@@ -55,8 +60,9 @@ Servo s_RightF;
         setPosition(rightCM * (int)COUNTS_PER_CM, leftCM  *(int)COUNTS_PER_CM);
         //make the motors run to position
         setMode(DcMotor.RunMode.RUN_TO_POSITION);
-        //set the power so the robot can move 
-        setPower(speed, speed);
+        //set the power so the robot can move  and go straight
+        correction = checkDirection();
+        setPower(speed - correction, speed + correction);
         
         //this loop yields the thread while the motors are turning
         while (m_leftBack.isBusy() && m_leftFront.isBusy() 
@@ -88,7 +94,7 @@ Servo s_RightF;
         setMode(DcMotor.RunMode.RUN_USING_ENCODER);
     }
     
-    
+//////////////////////////////////////////////////////////////////////////////////////////////////////////    
 
    //The central elasped time responsible for all motor movement
     ElapsedTime m_time = new ElapsedTime();
@@ -100,6 +106,9 @@ Servo s_RightF;
     static final double     WHEEL_DIAMETER_CM       = 8.5 ;     // For figuring circumference
     static final double     COUNTS_PER_CM           = (COUNTS_PER_MOTOR_REV) /
                                                       (WHEEL_DIAMETER_CM * 3.1415);
+      
+      
+/////////////////////////////////////////////////////////////////////////////////////////////////////////      
         public void setMode(DcMotor.RunMode mode) {
         m_leftBack.setMode(mode);
         m_leftFront.setMode(mode);
@@ -127,7 +136,48 @@ Servo s_RightF;
         m_rightBack.setPower(right);
         m_rightFront.setPower(right);
     }
+     private double checkDirection()
+    {
+        // The gain value determines how sensitive the correction is to direction changes.
+        // You will have to experiment with your robot to get small smooth direction changes
+        // to stay on a straight line.
+        double correction, angle, gain = .10;
+
+        angle = getAngle();
+
+        if (angle == 0)
+            correction = 0;             // no adjustment.
+        else
+            correction = -angle;        // reverse sign of angle for correction.
+
+        correction = correction * gain;
+
+        return correction;
+    }
+        private double getAngle()
+    {
+        // We experimentally determined the Z axis is the axis we want to use for heading angle.
+        // We have to process the angle because the imu works in euler angles so the Z axis is
+        // returned as 0 to +180 or 0 to -180 rolling back to -179 or +179 when rotation passes
+        // 180 degrees. We detect this transition and track the total cumulative angle of rotation.
+
+        Orientation angles = imu.getAngularOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
+
+        double deltaAngle = angles.firstAngle - lastAngles.firstAngle;
+
+        if (deltaAngle < -180)
+            deltaAngle += 360;
+        else if (deltaAngle > 180)
+            deltaAngle -= 360;
+
+        globalAngle += deltaAngle;
+
+        lastAngles = angles;
+
+        return globalAngle;
+    }
     
+///////////hook///////////////////////////////////////////////////////////////////////////////////////////////    
         public void hook(boolean raiseHook) {
         if (raiseHook == true) {
             s_LeftF.setPosition(0.7);
@@ -156,13 +206,41 @@ i_Left = hardwareMap.get(DcMotor.class, "LI");
 //servo
  s_LeftF = hardwareMap.get(Servo.class, "fLeft");
  s_RightF = hardwareMap.get(Servo.class, "fRight");
-
+//Direction/////////////////////////////////////////////////////////////////////////////////////////////
         m_leftFront.setDirection(DcMotor.Direction.REVERSE);
         m_leftBack.setDirection(DcMotor.Direction.REVERSE);
         m_rightBack.setDirection(DcMotor.Direction.FORWARD);
         m_rightFront.setDirection(DcMotor.Direction.FORWARD);
         i_Left.setDirection(DcMotor.Direction.FORWARD);
         i_Right.setDirection(DcMotor.Direction.REVERSE);
+        
+        
+//Buncha IMU stuff///////////////////////////////////////////////////////////////////////////////////////
+        BNO055IMU.Parameters parameters = new BNO055IMU.Parameters();
+
+        parameters.mode                = BNO055IMU.SensorMode.IMU;
+        parameters.angleUnit           = BNO055IMU.AngleUnit.DEGREES;
+        parameters.accelUnit           = BNO055IMU.AccelUnit.METERS_PERSEC_PERSEC;
+        parameters.loggingEnabled      = false;
+
+        // Retrieve and initialize the IMU. We expect the IMU to be attached to an I2C port
+        // on a Core Device Interface Module, configured to be a sensor of type "AdaFruit IMU",
+        // and named "imu".
+        imu = hardwareMap.get(BNO055IMU.class, "imu");
+
+        imu.initialize(parameters);
+
+        telemetry.addData("Mode", "calibrating...");
+        telemetry.update();
+
+        // make sure the imu gyro is calibrated before continuing.
+        while (!isStopRequested() && !imu.isGyroCalibrated())
+        {
+            sleep(50);
+            idle();
+        }
+        
+        
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
  waitForStart();
 ////////////////////////////////////////////////////////////////////////////////////////////////////////// 
@@ -170,7 +248,7 @@ i_Left = hardwareMap.get(DcMotor.class, "LI");
 switch (blue){
     
 case 1:
-drive(-.5, -70,-75);
+drive(-.5, -70,-70);
 hook(false);    
 drive(0.5, 75,75);
 hook(true);
@@ -184,7 +262,7 @@ case 2:
 break;
 
 case 3:
- strafing(0.75, -80,80 ); 
+ drive(0.75, 80,80 ); 
     
     
 break;
